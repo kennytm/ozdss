@@ -1,0 +1,4 @@
+#!/bin/bash
+
+rm -f "${1}f"
+ozc -c $1 && ozengine "${1}f"
