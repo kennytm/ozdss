@@ -1,7 +1,6 @@
 functor
 import
     OS
-    System
 
 export
     RandomUUID

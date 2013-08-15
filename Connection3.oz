@@ -1,23 +1,22 @@
 functor
 import
+    Connection2
     System
-    Application
-    Reflection at 'x-oz://boot/Reflection'
-    Pickle
-    Open
-    DSSCommon
 
 define
-    Client1 = {New Open.socket client(host:'127.0.0.1' port:9000)}
-    Client2 = {New Open.socket client(host:'127.0.0.1' port:9000)}
+    R = {NewCell 0}
+    S
+    T = r(S S R)
 
-    {Client1 write(vs:'XDDD')}
-    {Client2 write(vs:'WTF')}
-    {System.show {Client1 read(list:$)}}
-    {System.show {Client2 read(list:$)}}
+    {System.showInfo waiting}
 
-    {Client1 close}
-    {Client2 close}
+    Ticket = {Connection2.offer T}
+
+    {System.showInfo Ticket}
+
+    {Time.delay 10000}
+
+    {System.show T}
 end
 
 

@@ -3,24 +3,16 @@ import
     Property
     UUID
     OS
-    System
 
 export
-    Init
     GetTicketPrefix
+    ParseTicketURL
     MyPort
     MySiteID
     MyIP
+    SetPort
 
 define
-    %%% Define default settings for DP module
-    proc {Init}
-        {Property.put 'dp.firewalled' false}
-        {Property.put 'dss.ip' {GetLocalIP}}
-        {Property.put 'dss.identifier' {UUID.randomUUID}}
-        {Property.put 'dss.port' 9000}
-    end
-
     %%% Get the 'rank' of an IPv4 or v6 address. A higher-ranked IP has more
     %%% exposure to the network, thus more suitable as a site address.
     fun {GetIPRank IP}
@@ -42,6 +34,7 @@ define
         [] &1|&7|&2|&.|&2|_|&.|_ then 5
         [] &1|&7|&2|&.|&3|&0|&.|_ then 5
         [] &1|&7|&2|&.|&3|&1|&.|_ then 5
+        [] &1|&9|&2|&.|&1|&6|&8|&.|_ then 5
         [] &F|&C|_|_|&:|_ then 4
         [] &F|&D|_|_|&:|_ then 4
         [] &F|&E|&8|_|&:|_ then 2
@@ -60,49 +53,71 @@ define
         end
     end
 
-    %%% Find the maximum of list L, ordered by the keying function K.
-    fun {MaxBy L K}
-        MaxElem = {NewCell L.1}
-        MaxKey = {NewCell {K L.1}}
-    in
-        for Elem in L.2 do
-            Key = {K Elem}
-        in
-            if Key > @MaxKey then
-                MaxKey := Key
-                MaxElem := Elem
-            end
-        end
-        @MaxElem
-    end
-
     %%% Obtain the IP address of this computer. Note that the result is usually
     %%% useless outside of the local network if the computer is behind a router.
     fun {GetLocalIP}
-        % What if this list is empty?
-        AllAddr = {OS.getHostByName {OS.uName}.nodename}.addrList
+        AllAddr = "127.0.0.1" | {OS.getHostByName {OS.uName}.nodename}.addrList
+        BestIP = {NewCell AllAddr.1}
+        BestRank = {NewCell {GetIPRank AllAddr.1}}
     in
-        {MaxBy AllAddr GetIPRank}
+        for IP in AllAddr.2 do
+            Rank = {GetIPRank IP}
+        in
+            if Rank > @BestRank then
+                BestRank := Rank
+                BestIP := IP
+            end
+        end
+        % Check if we've got an IPv6 address. If yes, surround with '[' ... ']'.
+        {VirtualString.toCompactString (if @BestRank mod 2 == 0 then
+            '['#@BestIP#']'
+        else
+            @BestIP
+        end)}
     end
 
     %%% Get the IP used to broadcast this computer.
-    fun {MyIP}
-        {Property.get 'dss.ip'}
-    end
+    fun {MyIP} @MyIPCell end
 
     %%% Get the unique identifier to identify this site in the machine.
-    fun {MySiteID}
-        {Property.get 'dss.identifier'}
-    end
+    fun {MySiteID} @MyIdentifierCell end
 
     %%% Get the port used to access this site.
-    fun {MyPort}
-        {Property.get 'dss.port'}
-    end
+    fun {MyPort} @MyPortCell end
+
+    %%% Change the port used to access this site. If called, this method must be
+    %%% placed before any DSS operations.
+    proc {SetPort NewPortI} MyPortCell := NewPortI end
 
     %%% Get the prefix to a ticket on this site.
     fun {GetTicketPrefix}
         'oz-ticket://'#{MyIP}#':'#{MyPort}#'/tickets/'#{MySiteID}#'/'
     end
+
+    proc {ParseTicketURL URL ?IP ?Port ?TicketID}
+        IPPort
+        TicketIDString
+        IPString
+        PortString
+    in
+        ["oz-ticket:" nil IPPort "tickets" /*SiteID*/_ TicketIDString] =
+                {String.tokens {VirtualString.toString URL} &/}
+        TicketID = {StringToInt TicketIDString}
+        if IPPort.1 == &[ then
+            % IPv6.
+            {String.token IPPort &] ?IPString ?PortString}
+            IP = IPString#']'
+            Port = {StringToInt PortString.2}
+        else
+            % IPv4
+            {String.token IPPort &: ?IP ?PortString}
+            Port = {StringToInt PortString}
+        end
+    end
+
+    %%% Define default settings for DP module
+    MyIPCell = {NewCell {Property.condGet 'dss.ip' {GetLocalIP}}}
+    MyIdentifierCell = {NewCell {Property.condGet 'dss.identifier' {UUID.randomUUID}}}
+    MyPortCell = {NewCell {Property.condGet 'dss.port' 9000}}
 end
 

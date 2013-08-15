@@ -1,137 +1,266 @@
 functor
 import
     System
-    Application
     Pickle
     Open
     DSSCommon
     ProxyValue
 
+export
+    OfferOnce
+    offer: OfferOnce
+    OfferMany
+    offerUnlimited: OfferMany
+    Take
+
 define
     %%% Store all tickets that can be taken. The key is the ticket ID, and the
-    %%% values can be `once(X Y Z)`, meaning `X#Y#Z` should be sent to the other
-    %%% side and be deleted after taken, or `many(X Y Z)`, for it won't be
-    %%% deleted.
+    %%% values can be `once(X Y)`, meaning `X#Y` should be sent to the other
+    %%% side and be deleted after taken, or `many(X Y)`, for it won't be deleted.
     %%%
-    %%% The `X`, `Y` and `Z` are
+    %%% The `X` and `Y` are
     %%%  X. The value itself.
-    %%%  Y. The list of names which will become ReflectiveVariable when sent to
-    %%%     the other side.
-    %%%  Z. The list of names which will become ReflectiveEntity when sent to
-    %%%     the other side.
+    %%%  Y. The list of names which will become ReflectiveVariable/Entity when
+    %%%     sent to the other side.
     TicketStore = {NewDictionary}
     NextTicketID = {NewCell 0}
+    Initialized = {NewCell false}
 
     %%% Initialize the connection module.
     proc {Init}
-        Server
-    in
-        {DSSCommon.init}
-
-        % We don't care about the finalizer stream. We just want those variables
-        % go away if no one need them.
-        {WeakDictionary.close ProxyStore}
-
-        {RunServer}
+        if {Not @Initialized} then
+            {RunServer}
+            Initialized := true
+        end
     end
 
+    % {{{ Low-level Serialization/Deserialization.
+
+    %%% Serialize a status code and the containing data of the form `ok(...)`
+    %%% or `notFound` etc. to in a VBS suitable for sending. This is mainly for
+    %%% sending a reply from server to client.
     fun {SerializeResponse StatusCodeAndData}
         {Pickle.pack StatusCodeAndData}
     end
 
+    %%% Deserialize a VBS into a status code and containg data of the form
+    %%% `ok(...)` or `notFound` etc. This is mainly for receiving a reply from
+    %%% server to client.
     fun {DeserializeResponse RawData}
         {Pickle.unpack RawData}
     end
 
+    %%% Deserialize a VBS into a request. This is mainly for receiving a request
+    %%% from client to server.
     proc {DeserializeRequest RawData ?Action ?ReplyIP ?ReplyPort ?Data}
-        Action(ReplyIP ReplyPort Data) = {Pickle.unpack RawData}
+        ReplyIPVS
+    in
+        post(Action ReplyIPVS ReplyPort Data) = {Pickle.unpack RawData}
+        ReplyIP = {VirtualString.toCompactString ReplyIPVS}
     end
 
+    %%% Serialize a request into VBS. This is mainly for sending a request from
+    %%% client to server.
     fun {SerializeRequest Action IP Port Data}
-        {Pickle.pack Action(IP Port Data)}
+        {Pickle.pack post(Action IP Port Data)}
     end
 
-    fun {TakeSender TicketID IP Port}
-        case {Dictionary.condGet TicketStore TicketID unit}
-        of many(Info) then
-            ok(Info)
-        [] once(Info) then
-            {Dictionary.remove TicketStore TicketID}
-            ok(Info)
-        else
-            notFound
+    % }}}
+
+    % {{{ ProxyValue-related.
+
+    %%% Create a callback function for the reflective entities. When the
+    %%% callback function runs, a `perform` action will be sent to the client at
+    %%% the corresponding IP:Port.
+    proc {ProxyCallback IP#Port EncodedAction ProxyNames}
+        for _#Name in ProxyNames do
+            {ProxyValue.register Name IP#Port ProxyCallback}
+        end
+        {RunClient IP Port perform EncodedAction#ProxyNames}
+    end
+
+    proc {RegisterRemoteProxies IP Port ProxyNames}
+        for Type#N in ProxyNames do
+            {ProxyValue.addRemoteProxy Type N IP#Port ProxyCallback}
         end
     end
 
-    fun {TakeReceiver StatusCodeAndData}
-        case StatusCodeAndData
-        of ok(Info) then
-
-        [] Status then
-            raise Status end
+    proc {RegisterLocalProxies IP Port ProxyNames}
+        for _#N in ProxyNames do
+            {System.show [1 N IP Port]}
+            {ProxyValue.register N IP#Port ProxyCallback}
+            {System.show [2 N IP Port]}
         end
     end
 
-    Senders = r(
-        take: TakeSender
+    % }}}
+
+    % {{{ Processors
+
+    %%% An interface for all action precessors.
+    class Processor from BaseObject
+        meth reply(Info ip:IP port:Port result:?ReplyStatusCodeAndData)
+            ReplyStatusCodeAndData = badRequest
+        end
+
+        meth onReply(IP Port StatusCodeAndData ?Reply)
+            if {Label StatusCodeAndData} \= ok then
+                {Exception.raiseError StatusCodeAndData}
+            else
+                Message = receive(ip:IP port:Port result:?Reply)
+            in
+                {self {Adjoin StatusCodeAndData Message}}
+            end
+        end
+    end
+
+    class TakeProcessor from Processor
+        meth reply(TicketID ip:IP port:Port result:?Result)
+            case {Dictionary.condGet TicketStore TicketID unit}
+            of t(Persistence Value ProxyNames) then
+                % Found a ticket. We register those proxies to the client's IP
+                % and port, so they could transparently receive the updates.
+                {System.show ProxyNames}
+                {RegisterLocalProxies IP Port ProxyNames}
+
+                % Remove the ticket if it can only be offered once.
+                if Persistence == once then
+                    {Dictionary.remove TicketStore TicketID}
+                end
+
+                Result = ok(Value ProxyNames)
+            else
+                % Ticket not found.
+                Result = notFound
+            end
+        end
+
+        meth receive(Value ProxyNames ip:IP port:Port result:?Result)
+            {RegisterRemoteProxies IP Port ProxyNames}
+            Result = {ProxyValue.decode Value}
+        end
+    end
+
+    class PerformProcessor from Processor
+        meth reply(Info ip:IP port:Port result:?Result)
+            Action#ProxyNames = Info
+        in
+            {RegisterRemoteProxies IP Port ProxyNames}
+            {ProxyValue.injectAction Action IP#Port}
+            Result = ok
+        end
+
+        meth receive(...)
+            skip
+        end
+    end
+
+    Processors = r(
+        take: {New TakeProcessor noop}
+        perform: {New PerformProcessor noop}
     )
 
-    Receivers = r(
-        take: TakeReceiver
-    )
+    %}}}
 
+    % {{{ Server/client
+
+    ServerBlockingQueue = {NewCell nil}
 
     proc {RunServer}
         S = {New Open.socket init}
     in
-        {S bind(takePort:{DSSCommon.getPort})}
+        {S bind(takePort:{DSSCommon.myPort})}
         {S listen}
         thread
-            for while:true do C in
-                {S accept(acceptClass:Open.socket accepted:C)}
+            for do
+                C = {S accept(acceptClass:Open.socket accepted:$)}
+            in
                 thread
-                    Data Action IP Port
+                    RawData Data Action IP Port StatusCodeAndData
+                in
+                    % Block until the server is free to read anything.
+                    {ForAll {Exchange ServerBlockingQueue $ nil} Wait}
                     StatusCodeAndData = try
-                        {DeserializeRequest {C read(list:$)} ?Action ?IP ?Port ?Data}
-                        {Senders.Action Data IP Port}
-                    catch _ then
+                        Data = {DeserializeRequest {C read(list:$)} ?Action ?IP ?Port}
+                        {System.show [Action IP Port Data]}
+                        {Processors.Action reply(Data ip:IP port:Port result:$)}
+                    catch E then
+                        {System.show E}
                         internalServerError
                     end
-                in
-                    {C send(vs:{SerializeResponse StatusCodeAndData})}
+                    {System.show StatusCodeAndData}
+                    {C write(vs:{SerializeResponse StatusCodeAndData})}
                 end
             end
         end
-        S
     end
 
-    proc {RunClient Host Port Action Info}
-        C = {New Open.socket init}
-        Data
+    fun {WithBlockingServer F}
+        OldValue
+        Blocker
+        RetVal
+    in
+        {Exchange ServerBlockingQueue OldValue (!!Blocker)|OldValue}
+        RetVal = {F}
+        Blocker = unit % unblock the server by making it deterministic.
+        RetVal
+    end
+
+    fun {RunClient IP Port Action Info}
+        C = {New Open.socket client(host:IP port:Port)}
         Result
     in
-        {C client(host:Host port:Port)}
-        {C send(vs:{SerializeRequest Action {DSSCommon.myIP} {DSSCommon.myPort} Info})}
-        Data = {C read(list:$)}
-        Result = {Receivers.Action {DeserializeResponse Data}}
-        {C shutDown(how:[receive])}
+        % Block the server until we have atomically sent and received the data
+        % we need. This avoids race condition when the server gives us something
+        % we aren't ready to digest.
+        Result = {WithBlockingServer fun {$}
+            Data
+        in
+            {System.show 'sending...'}
+            {C send(vs:{SerializeRequest Action {DSSCommon.myIP} {DSSCommon.myPort} Info})}
+            {System.show 'reading...'}
+            Data = {C read(list:$)}
+            {System.show 'replying...'}
+            {Processors.Action onReply(IP Port {DeserializeResponse Data} $)}
+        end}
+        {C close}
         Result
     end
 
-    fun {ParseData Data}
-        % Actually I prefer an HTTP-based protocol, but currently Oz doesn't
-        % have a regex module.
-        Action(ReplyIP ReplyPort Info) = {Pickle.unpack Data}
-        {New RequestClasses.Action init(ReplyIP ReplyPort Info)}
-    end
+    % }}}
 
-    fun {OfferOnce Data}
-        TicketID = @NextTicketID
+    fun {OfferWithPeristence Persistence V}
+        TicketID
+        NewTicketID
+        EncocdedData
+        NewProxyNames = {NewCell nil}
     in
-        NextTicketID := TicketID + 1
+        {Init}
 
+        % Atomically increase the ticket ID.
+        {Exchange NextTicketID ?TicketID ?NewTicketID}
+        NewTicketID = TicketID + 1
+
+        EncocdedData = {ProxyValue.encode V ?NewProxyNames}
+        {Dictionary.put TicketStore TicketID t(Persistence EncocdedData @NewProxyNames)}
+
+        {DSSCommon.getTicketPrefix}#TicketID
     end
-in
-    {Init}
+
+    fun {OfferOnce V}
+        {OfferWithPeristence once V}
+    end
+
+    fun {OfferMany V}
+        {OfferWithPeristence many V}
+    end
+
+    fun {Take TicketURL}
+        IP Port TicketID
+    in
+        {Init}
+        {DSSCommon.parseTicketURL TicketURL ?IP ?Port ?TicketID}
+        {RunClient IP Port take TicketID}
+    end
 end
 
