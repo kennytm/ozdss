@@ -20,10 +20,6 @@ define
 
     Missing = {NewName}
 
-    fun {PairwiseLessThan A#B C#D}
-        A < B orelse (A == B andthen C < D)
-    end
-
     %%% A placeholder which will holds the bridge between a reflective
     %%% variable/entity and the represented object. This class must be private.
     class Proxy
@@ -33,7 +29,7 @@ define
             reflObject
 
         attr
-            callbacks: {GenericDictionary.new PairwiseLessThan}
+            callbacks: {GenericDictionary.new Value.'<'}
 
         meth init(Type value:Value<=unit name:Name<={NewName})
             Stream
@@ -72,11 +68,13 @@ define
             DataToSend = {Encode Action NewProxyNamesCL}
             NewProxyNames = @NewProxyNamesCL
         in
+            {System.show [injectAction self.value Action ExcludeCallbackKey]}
+
             % Send this action to other people.
-            {GenericDictionary.forAllInd @callbacks proc {$ K C}
+            {GenericDictionary.forAllInd @callbacks proc {$ K Callback#Context}
                 if K \= ExcludeCallbackKey then
                     thread
-                        {C K DataToSend NewProxyNames}
+                        {Callback K Context self.name DataToSend NewProxyNames}
                     end
                 end
             end}
@@ -88,6 +86,8 @@ define
                 % control.
                 {Reflection.bindReflectiveVariable self.reflObject X}
                 {WeakDictionary.remove ProxyStore self.name}
+            [] markNeeded then
+                {Exception.raiseError wtf}
             else
                 if self.value \= unit then
                     {self doAction(Action)}
@@ -96,14 +96,20 @@ define
         end
 
         meth doAction(Action)
-            skip
+            case Action
+            of assign(X) then {Assign self.value X}
+            [] isCell(?R) then R = {IsCell self.value}
+            [] access(?R) then R = {Access self.value}
+            else
+                {Exception.raiseError unknownAction(Action)}
+            end
         end
 
-        meth register(Key Callback)
+        meth register(Key Callback Context)
             OldCallbacks NewCallbacks
         in
             OldCallbacks = callbacks <- NewCallbacks
-            NewCallbacks = {GenericDictionary.put OldCallbacks Key Callback}
+            NewCallbacks = {GenericDictionary.put OldCallbacks Key Callback#Context}
         end
 
         meth unregister(Key)
@@ -128,22 +134,19 @@ define
     fun {MapWalkImpl V OnVariable OnToken OnName References}
         case {Reflection.getStructuralBehavior V}
         of value then
-            if {IsName V} then
-                {OnName V}
-            else
-                V
-            end
+            V
         [] variable then
             {OnVariable V}
         [] token then
-            OldDict NewDict OldValue NewValue Existing
+            OldDict NewDict OldValue NewValue Transformer Existing
         in
             {Exchange References ?OldDict ?NewDict}
             NewDict = {LinearDictionary.condPut OldDict V ?OldValue NewValue ?Existing}
             if Existing then
                 OldValue
             else
-                NewValue = {OnToken V}
+                Transformer = if {IsName V} then OnName else OnToken end
+                NewValue = {Transformer V}
                 NewValue
             end
 
@@ -234,22 +237,24 @@ define
                 N
             end
         end
+
+        Res
     in
         {MapWalk V /*OnVariable=*/Identity /*OnToken=*/Identity OnName}
     end
 
-    proc {Register N Key Callback}
+    proc {Register N Key Callback Context}
         P = {WeakDictionary.condGet ProxyStore N unit}
     in
         if P \= unit then
-            {P register(Key Callback)}
+            {P register(Key Callback Context)}
         end
     end
 
-    proc {AddRemoteProxy Type Name Key ReplyCallback}
+    proc {AddRemoteProxy Type Name Key ReplyCallback ReplyContext}
         P = {New Proxy init(Type name:Name)}
     in
-        {P register(Key ReplyCallback)}
+        {P register(Key ReplyCallback ReplyContext)}
         {WeakDictionary.put ProxyStore Name P}
     end
 

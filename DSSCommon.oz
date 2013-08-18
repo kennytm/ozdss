@@ -94,30 +94,33 @@ define
         'oz-ticket://'#{MyIP}#':'#{MyPort}#'/tickets/'#{MySiteID}#'/'
     end
 
-    proc {ParseTicketURL URL ?IP ?Port ?TicketID}
+    proc {ParseTicketURL URL ?IP ?Port ?SiteID ?TicketID}
         IPPort
         TicketIDString
         IPString
         PortString
+        SiteIDString
     in
-        ["oz-ticket:" nil IPPort "tickets" /*SiteID*/_ TicketIDString] =
+        ["oz-ticket:" nil IPPort "tickets" SiteIDString TicketIDString] =
                 {String.tokens {VirtualString.toString URL} &/}
         TicketID = {StringToInt TicketIDString}
+        SiteID = {VirtualString.toCompactString SiteIDString}
         if IPPort.1 == &[ then
             % IPv6.
             {String.token IPPort &] ?IPString ?PortString}
-            IP = IPString#']'
+            IP = {VirtualString.toCompactString IPString#']'}
             Port = {StringToInt PortString.2}
         else
             % IPv4
-            {String.token IPPort &: ?IP ?PortString}
+            {String.token IPPort &: ?IPString ?PortString}
+            IP = {VirtualString.toCompactString IPString}
             Port = {StringToInt PortString}
         end
     end
 
     %%% Define default settings for DP module
     MyIPCell = {NewCell {Property.condGet 'dss.ip' {GetLocalIP}}}
-    MyIdentifierCell = {NewCell {Property.condGet 'dss.identifier' {UUID.randomUUID}}}
+    MyIdentifierCell = {NewCell {Property.condGet 'dss.identifier' {VirtualString.toCompactString {UUID.randomUUID}}}}
     MyPortCell = {NewCell {Property.condGet 'dss.port' 9000}}
 end
 

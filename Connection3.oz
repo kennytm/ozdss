@@ -2,6 +2,8 @@ functor
 import
     Connection2
     System
+    Reflection at 'x-oz://boot/Reflection'
+    OS
 
 define
     R = {NewCell 0}
@@ -14,9 +16,14 @@ define
 
     {System.showInfo Ticket}
 
-    {Time.delay 10000}
+    {OS.read 0 1 _ nil _}
 
     {System.show T}
+
+    {System.show @(T.3)}
+
+    {Assign T.3 test}
+
 end
 
 

@@ -52,17 +52,20 @@ define
 
     %%% Deserialize a VBS into a request. This is mainly for receiving a request
     %%% from client to server.
-    proc {DeserializeRequest RawData ?Action ?ReplyIP ?ReplyPort ?Data}
-        ReplyIPVS
+    %%%
+    %%% Returns whether the site ID of the request matches this site's real ID.
+    fun {DeserializeRequest RawData ?Action ?ReplyIP ?ReplyPort ?ReplySiteID ?Data}
+        ReplyIPVS SiteID
     in
-        post(Action ReplyIPVS ReplyPort Data) = {Pickle.unpack RawData}
+        post(SiteID Action ReplyIPVS ReplyPort ReplySiteID Data) = {Pickle.unpack RawData}
         ReplyIP = {VirtualString.toCompactString ReplyIPVS}
+        SiteID == {DSSCommon.mySiteID}
     end
 
     %%% Serialize a request into VBS. This is mainly for sending a request from
     %%% client to server.
-    fun {SerializeRequest Action IP Port Data}
-        {Pickle.pack post(Action IP Port Data)}
+    fun {SerializeRequest SiteID Action ReplyIP ReplyPort ReplySiteID Data}
+        {Pickle.pack post(SiteID Action ReplyIP ReplyPort ReplySiteID Data)}
     end
 
     % }}}
@@ -72,24 +75,22 @@ define
     %%% Create a callback function for the reflective entities. When the
     %%% callback function runs, a `perform` action will be sent to the client at
     %%% the corresponding IP:Port.
-    proc {ProxyCallback IP#Port EncodedAction ProxyNames}
+    proc {ProxyCallback SiteID IP#Port SrcName EncodedAction ProxyNames}
         for _#Name in ProxyNames do
-            {ProxyValue.register Name IP#Port ProxyCallback}
+            {ProxyValue.register Name SiteID ProxyCallback IP#Port}
         end
-        {RunClient IP Port perform EncodedAction#ProxyNames}
+        _ = {RunClient IP Port SiteID perform EncodedAction#ProxyNames#SrcName}
     end
 
-    proc {RegisterRemoteProxies IP Port ProxyNames}
+    proc {RegisterRemoteProxies IP Port SiteID ProxyNames}
         for Type#N in ProxyNames do
-            {ProxyValue.addRemoteProxy Type N IP#Port ProxyCallback}
+            {ProxyValue.addRemoteProxy Type N SiteID ProxyCallback IP#Port}
         end
     end
 
-    proc {RegisterLocalProxies IP Port ProxyNames}
+    proc {RegisterLocalProxies IP Port SiteID ProxyNames}
         for _#N in ProxyNames do
-            {System.show [1 N IP Port]}
-            {ProxyValue.register N IP#Port ProxyCallback}
-            {System.show [2 N IP Port]}
+            {ProxyValue.register N SiteID ProxyCallback IP#Port}
         end
     end
 
@@ -99,15 +100,15 @@ define
 
     %%% An interface for all action precessors.
     class Processor from BaseObject
-        meth reply(Info ip:IP port:Port result:?ReplyStatusCodeAndData)
+        meth reply(Info ip:IP port:Port siteID:SiteID result:?ReplyStatusCodeAndData)
             ReplyStatusCodeAndData = badRequest
         end
 
-        meth onReply(IP Port StatusCodeAndData ?Reply)
+        meth onReply(IP Port SiteID StatusCodeAndData ?Reply)
             if {Label StatusCodeAndData} \= ok then
                 {Exception.raiseError StatusCodeAndData}
             else
-                Message = receive(ip:IP port:Port result:?Reply)
+                Message = receive(ip:IP port:Port siteID:SiteID result:?Reply)
             in
                 {self {Adjoin StatusCodeAndData Message}}
             end
@@ -115,13 +116,12 @@ define
     end
 
     class TakeProcessor from Processor
-        meth reply(TicketID ip:IP port:Port result:?Result)
+        meth reply(TicketID ip:IP port:Port siteID:SiteID result:?Result)
             case {Dictionary.condGet TicketStore TicketID unit}
             of t(Persistence Value ProxyNames) then
                 % Found a ticket. We register those proxies to the client's IP
                 % and port, so they could transparently receive the updates.
-                {System.show ProxyNames}
-                {RegisterLocalProxies IP Port ProxyNames}
+                {RegisterLocalProxies IP Port SiteID ProxyNames}
 
                 % Remove the ticket if it can only be offered once.
                 if Persistence == once then
@@ -135,18 +135,18 @@ define
             end
         end
 
-        meth receive(Value ProxyNames ip:IP port:Port result:?Result)
-            {RegisterRemoteProxies IP Port ProxyNames}
+        meth receive(Value ProxyNames ip:IP port:Port siteID:SiteID result:?Result)
+            {RegisterRemoteProxies IP Port SiteID ProxyNames}
             Result = {ProxyValue.decode Value}
         end
     end
 
     class PerformProcessor from Processor
-        meth reply(Info ip:IP port:Port result:?Result)
-            Action#ProxyNames = Info
+        meth reply(Info ip:IP port:Port siteID:SiteID result:?Result)
+            Action#ProxyNames#SrcName = Info
         in
-            {RegisterRemoteProxies IP Port ProxyNames}
-            {ProxyValue.injectAction Action IP#Port}
+            {RegisterRemoteProxies IP Port SiteID ProxyNames}
+            {ProxyValue.injectAction SrcName {ProxyValue.decode Action} SiteID}
             Result = ok
         end
 
@@ -176,19 +176,20 @@ define
                 C = {S accept(acceptClass:Open.socket accepted:$)}
             in
                 thread
-                    RawData Data Action IP Port StatusCodeAndData
+                    RawData Data Action IP Port SiteID StatusCodeAndData
                 in
                     % Block until the server is free to read anything.
                     {ForAll {Exchange ServerBlockingQueue $ nil} Wait}
                     StatusCodeAndData = try
-                        Data = {DeserializeRequest {C read(list:$)} ?Action ?IP ?Port}
-                        {System.show [Action IP Port Data]}
-                        {Processors.Action reply(Data ip:IP port:Port result:$)}
+                        if {DeserializeRequest {C read(list:$)} ?Action ?IP ?Port ?SiteID ?Data} then
+                            {Processors.Action reply(Data ip:IP port:Port siteID:SiteID result:$)}
+                        else
+                            badRequest
+                        end
                     catch E then
                         {System.show E}
                         internalServerError
                     end
-                    {System.show StatusCodeAndData}
                     {C write(vs:{SerializeResponse StatusCodeAndData})}
                 end
             end
@@ -206,7 +207,7 @@ define
         RetVal
     end
 
-    fun {RunClient IP Port Action Info}
+    fun {RunClient IP Port SiteID Action Info}
         C = {New Open.socket client(host:IP port:Port)}
         Result
     in
@@ -215,13 +216,14 @@ define
         % we aren't ready to digest.
         Result = {WithBlockingServer fun {$}
             Data
+            Res
         in
-            {System.show 'sending...'}
-            {C send(vs:{SerializeRequest Action {DSSCommon.myIP} {DSSCommon.myPort} Info})}
-            {System.show 'reading...'}
+            {C send(vs:{SerializeRequest SiteID Action
+                                         {DSSCommon.myIP} {DSSCommon.myPort}
+                                         {DSSCommon.mySiteID}
+                                         Info})}
             Data = {C read(list:$)}
-            {System.show 'replying...'}
-            {Processors.Action onReply(IP Port {DeserializeResponse Data} $)}
+            {Processors.Action onReply(IP Port SiteID {DeserializeResponse Data} $)}
         end}
         {C close}
         Result
@@ -256,11 +258,12 @@ define
     end
 
     fun {Take TicketURL}
-        IP Port TicketID
+        IP Port SiteID TicketID
+        Result
     in
         {Init}
-        {DSSCommon.parseTicketURL TicketURL ?IP ?Port ?TicketID}
-        {RunClient IP Port take TicketID}
+        {DSSCommon.parseTicketURL TicketURL ?IP ?Port ?SiteID ?TicketID}
+        {RunClient IP Port SiteID take TicketID}
     end
 end
 
