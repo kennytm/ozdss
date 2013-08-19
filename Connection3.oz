@@ -6,23 +6,25 @@ import
     OS
 
 define
-    R = {NewCell 0}
+    R = {NewCell 7890}
     S
-    T = r(S S R)
+    T = R
 
     {System.showInfo waiting}
 
-    Ticket = {Connection2.offer T}
+    Ticket = {Connection2.offer R}
 
     {System.showInfo Ticket}
 
     {OS.read 0 1 _ nil _}
 
+    {Time.delay 1000}
+
     {System.show T}
 
-    {System.show @(T.3)}
+    {System.show {Access T}}
 
-    {Assign T.3 test}
+    {Assign T test}
 
 end
 

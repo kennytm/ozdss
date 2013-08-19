@@ -10,12 +10,12 @@ define
 
     {System.show {DSSCommon.myPort}}
 
-    OMG = {Connection2.take 'oz-ticket://192.168.100.211:9000/tickets/90a1901d-a424-4441-89d7-f075d70fd2c0/0'}
+    OMG = {Connection2.take 'oz-ticket://192.168.100.211:9000/tickets/' #
+        'c85bd1db-6482-4fc3-b0e9-99e5a28e147b/0'}
 
     {System.show OMG}
 
-    OMG.1 = 12356
-    {Assign OMG.3 3456}
+    {Assign OMG 3456}
 
     {System.show OMG}
 
@@ -23,7 +23,7 @@ define
 
     {System.show [preparing to show]}
 
-    {System.show @(OMG.3)}
+    {System.show {Access OMG}}
 
 
 end

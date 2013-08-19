@@ -33,6 +33,7 @@ define
 
         meth init(Type value:Value<=unit name:Name<={NewName})
             Stream
+            R
         in
             self.name = Name
             if Type == variable then
@@ -52,6 +53,10 @@ define
             thread
                 {self processStream(Stream)}
             end
+
+            R = self.name
+            _ = r(R: 1)
+            {System.show [init {Time.time} self.name self.value]}
         end
 
         meth processStream(Stream)
@@ -65,19 +70,10 @@ define
         meth injectAction(Action ExcludeCallbackKey<=Missing)
             % Encode the action into sendable form.
             NewProxyNamesCL = {NewCell nil}
-            DataToSend = {Encode Action NewProxyNamesCL}
-            NewProxyNames = @NewProxyNamesCL
+            DataToSend
+            NewProxyNames
         in
-            {System.show [injectAction self.value Action ExcludeCallbackKey]}
-
-            % Send this action to other people.
-            {GenericDictionary.forAllInd @callbacks proc {$ K Callback#Context}
-                if K \= ExcludeCallbackKey then
-                    thread
-                        {Callback K Context self.name DataToSend NewProxyNames}
-                    end
-                end
-            end}
+            {System.show [injectAction {Time.time} self.name self.value Action ExcludeCallbackKey]}
 
             % Now do the thing on our entities.
             case Action
@@ -87,12 +83,23 @@ define
                 {Reflection.bindReflectiveVariable self.reflObject X}
                 {WeakDictionary.remove ProxyStore self.name}
             [] markNeeded then
-                {Exception.raiseError wtf}
+                skip %{Exception.raiseError wtf}
             else
                 if self.value \= unit then
                     {self doAction(Action)}
                 end
             end
+
+            DataToSend = {Encode Action NewProxyNamesCL}
+            NewProxyNames = @NewProxyNamesCL
+            % Send this action to other people.
+            {GenericDictionary.forAllInd @callbacks proc {$ K Callback#Context}
+                if K \= ExcludeCallbackKey then
+                    thread
+                        {Callback K Context self.name DataToSend NewProxyNames}
+                    end
+                end
+            end}
         end
 
         meth doAction(Action)

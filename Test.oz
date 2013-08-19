@@ -1,28 +1,21 @@
 functor
 import
+    Reflection at 'x-oz://boot/Reflection'
     System
 
 define
-    WD = {NewWeakDictionary _}
-    X
-
-in
-    {WeakDictionary.close WD}
-
-    local
-        for I in 1..100 do
-            {WeakDictionary.put WD I {NewName}}
-        end
-        {System.show {WeakDictionary.keys WD}}
-    end
+    S
+    X = {Reflection.newReflectiveEntity ?S}
 
     thread
-        {System.gcDo}
-        X = unit
+        for A#C in S do
+            {System.show A}
+            C = unit
+        end
     end
 
-    {Wait X}
+    R = {Access X}
 
-    {System.show {WeakDictionary.keys WD}}
+
 end
 
