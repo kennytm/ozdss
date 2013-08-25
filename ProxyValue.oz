@@ -4,6 +4,7 @@ import
     LinearDictionary
     GenericDictionary
     System
+    Pickle
 
 export
     Encode
@@ -18,7 +19,14 @@ define
     %%% bound via a reflective bind, the corresponding entry should be dropped.
     ProxyStore = {NewWeakDictionary ?_}
 
+    %%% Just a dummy value to indicate a defaulted parameter.
     Missing = {NewName}
+
+    fun {HRN N}
+        B = {VirtualByteString.toCompactByteString {Pickle.pack N}}
+    in
+        {CompactByteString.slice B 13 {CompactByteString.length B}}
+    end
 
     %%% A placeholder which will holds the bridge between a reflective
     %%% variable/entity and the represented object. This class must be private.
@@ -27,36 +35,36 @@ define
             name
             value
             reflObject
+            isLocal
 
         attr
             callbacks: {GenericDictionary.new Value.'<'}
 
         meth init(Type value:Value<=unit name:Name<={NewName})
             Stream
-            R
         in
             self.name = Name
             if Type == variable then
                 self.reflObject = {Reflection.newReflectiveVariable ?Stream}
-                if {IsFree Value} then
+                self.isLocal = {IsFree Value}
+                if self.isLocal then
                     Value = self.reflObject
                 end
             else
                 self.reflObject = {Reflection.newReflectiveEntity ?Stream}
-                if Value \= unit then
-                    self.value = {Reflection.becomeExchange Value self.reflObject}
+                self.isLocal = (Value \= unit)
+                self.value = if self.isLocal then
+                    {Reflection.becomeExchange Value self.reflObject}
                 else
-                    self.value = unit
+                    unit
                 end
             end
+
+            {System.show [{HRN self.name} init(Type) self.isLocal]}
 
             thread
                 {self processStream(Stream)}
             end
-
-            R = self.name
-            _ = r(R: 1)
-            {System.show [init {Time.time} self.name self.value]}
         end
 
         meth processStream(Stream)
@@ -67,29 +75,12 @@ define
             {self processStream(Stream.2)}
         end
 
-        meth injectAction(Action ExcludeCallbackKey<=Missing)
+        meth invokeCallbacks(Action ExcludeCallbackKey)
             % Encode the action into sendable form.
             NewProxyNamesCL = {NewCell nil}
             DataToSend
             NewProxyNames
         in
-            {System.show [injectAction {Time.time} self.name self.value Action ExcludeCallbackKey]}
-
-            % Now do the thing on our entities.
-            case Action
-            of bind(X) then
-                % Bind is special. We can only bind once. The rest is out of our
-                % control.
-                {Reflection.bindReflectiveVariable self.reflObject X}
-                {WeakDictionary.remove ProxyStore self.name}
-            [] markNeeded then
-                skip %{Exception.raiseError wtf}
-            else
-                if self.value \= unit then
-                    {self doAction(Action)}
-                end
-            end
-
             DataToSend = {Encode Action NewProxyNamesCL}
             NewProxyNames = @NewProxyNamesCL
             % Send this action to other people.
@@ -102,14 +93,50 @@ define
             end}
         end
 
-        meth doAction(Action)
+        meth injectAction(Action ExcludeCallbackKey<=Missing)
+            {System.show [{HRN self.name} Action self.isLocal]}
+            case Action
+            of bind(X) then
+                % Bind is special. We can only bind once. The rest is out of our
+                % control. So just remove ourselves from the global dictionary.
+                {Reflection.bindReflectiveVariable self.reflObject X}
+                {WeakDictionary.remove ProxyStore self.name}
+
+                % We also need to tell the other sites that a value is bound,
+                % regardless local or remote.
+                {self invokeCallbacks(Action ExcludeCallbackKey)}
+            else
+                if self.isLocal then
+                    {self performAction(Action ExcludeCallbackKey)}
+                else
+                    {self sendRemoteAction(Action ExcludeCallbackKey)}
+                end
+            end
+        end
+
+        meth performAction(Action ExcludeCallbackKey)
+            % Run an action where we have a *known object* to operate on.
             case Action
             of assign(X) then {Assign self.value X}
             [] isCell(?R) then R = {IsCell self.value}
             [] access(?R) then R = {Access self.value}
+            [] arrayGet(I ?R) then R = {Get self.value I}
+            [] arrayPut(I V) then {Put self.value I V}
+            [] arrayExchange(I ?O N) then {Array.exchange self.value I ?O N}
+            [] isArray(?R) then R = {IsArray self.value}
+            [] arrayHigh(?R) then R = {Array.high self.value}
+            [] arrayLow(?R) then R = {Array.low self.value}
             else
+                {System.show unknownAction(Action)}
                 {Exception.raiseError unknownAction(Action)}
             end
+        end
+
+        meth sendRemoteAction(Action ExcludeCallbackKey)
+            % Run an action where we don't have a known object to operation on.
+            % What we can do is the reach for the server, and wait until they
+            % give us the known value.
+            {self invokeCallbacks(Action ExcludeCallbackKey)}
         end
 
         meth register(Key Callback Context)
@@ -191,7 +218,7 @@ define
         X
     end
 
-    %%% Convert all variables and stateful values to Placeholders.
+    %%% Convert all variables and stateful values to Proxy's.
     fun {Encode V NewProxyNamesCL}
         proc {AppendToCL Type N}
             OldList
@@ -250,6 +277,8 @@ define
         {MapWalk V /*OnVariable=*/Identity /*OnToken=*/Identity OnName}
     end
 
+    %%% Register a callback on a proxy represented by the name N. The callback
+    %%% is called whenever an action is performed on the object.
     proc {Register N Key Callback Context}
         P = {WeakDictionary.condGet ProxyStore N unit}
     in
@@ -258,6 +287,7 @@ define
         end
     end
 
+    %%% Add a proxy object which does not exist on the local site.
     proc {AddRemoteProxy Type Name Key ReplyCallback ReplyContext}
         P = {New Proxy init(Type name:Name)}
     in
