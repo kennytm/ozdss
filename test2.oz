@@ -1,15 +1,15 @@
 functor
 import
     System
-    Application
-    DPDefaults
 define
-    Res
+    D = {NewDictionary}
+    K = {VirtualString.toAtom "omgwtfbbq"}
+    L = {VirtualString.toAtom "hahahaha"}
 in
-    {DPDefaults.init}
-    Res = {Resolve "oz-site://[fe80:5::4e8d:79ff:fee1:fe1c]:9000/h3968883"}
-    {System.showInfo Res}
-    {Application.exit 0}
+    {Dictionary.put D K 1}
+    {Dictionary.put D L 2}
+    {System.show K < L}
+    {System.show {Dictionary.entries D}}
 end
 
 

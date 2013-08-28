@@ -4,7 +4,7 @@ import
     Pickle
     Open
     DSSCommon
-    ProxyValue
+    ReflectionEx
 
 export
     OfferOnce
@@ -15,13 +15,15 @@ export
 
 define
     %%% Store all tickets that can be taken. The key is the ticket ID, and the
-    %%% values can be `once(X Y)`, meaning `X#Y` should be sent to the other
-    %%% side and be deleted after taken, or `many(X Y)`, for it won't be deleted.
+    %%% values can be `once#X#Y#Z`, meaning `X#Y#Z` should be sent to the other
+    %%% side and be deleted after taken, or `many#X#Y#Z`, for it won't be
+    %%% deleted.
     %%%
-    %%% The `X` and `Y` are
+    %%% The `X`, `Y` and `Z` are
     %%%  X. The value itself.
-    %%%  Y. The list of names which will become ReflectiveVariable/Entity when
-    %%%     sent to the other side.
+    %%%  Y. The list of names which will become ReflectiveVariable when sent to
+    %%%     the other side.
+    %%%  Z. Similar to Y, but is for ReflectiveEntity.
     TicketStore = {NewDictionary}
     NextTicketID = {NewCell 0}
     Initialized = {NewCell false}
@@ -70,28 +72,13 @@ define
 
     % }}}
 
-    % {{{ ProxyValue-related.
+    % {{{ Reflection related.
 
     %%% Create a callback function for the reflective entities. When the
     %%% callback function runs, a `perform` action will be sent to the client at
     %%% the corresponding IP:Port.
-    proc {ProxyCallback SiteID IP#Port SrcName EncodedAction ProxyNames}
-        for _#Name in ProxyNames do
-            {ProxyValue.register Name SiteID ProxyCallback IP#Port}
-        end
-        _ = {RunClient IP Port SiteID perform EncodedAction#ProxyNames#SrcName}
-    end
-
-    proc {RegisterRemoteProxies IP Port SiteID ProxyNames}
-        for Type#N in ProxyNames do
-            {ProxyValue.addRemoteProxy Type N SiteID ProxyCallback IP#Port}
-        end
-    end
-
-    proc {RegisterLocalProxies IP Port SiteID ProxyNames}
-        for _#N in ProxyNames do
-            {ProxyValue.register N SiteID ProxyCallback IP#Port}
-        end
+    proc {ReflectionCallback SiteID IP#Port SrcName EncodedAction VarNames TokenNames}
+        _ = {RunClient IP Port SiteID perform EncodedAction#VarNames#TokenNames#SrcName}
     end
 
     % }}}
@@ -100,6 +87,7 @@ define
 
     %%% An interface for all action precessors.
     class Processor from BaseObject
+        %%% Reply a message received from the client.
         meth reply(Info ip:IP port:Port siteID:SiteID result:?ReplyStatusCodeAndData)
             ReplyStatusCodeAndData = badRequest
         end
@@ -113,40 +101,48 @@ define
                 {self {Adjoin StatusCodeAndData Message}}
             end
         end
+
+        %%% Receive a message from the server
+        % meth receive(... ip:IP port:Port siteID:SiteID result:?Reply)
+        %     skip
+        % end
     end
 
     class TakeProcessor from Processor
         meth reply(TicketID ip:IP port:Port siteID:SiteID result:?Result)
             case {Dictionary.condGet TicketStore TicketID unit}
-            of t(Persistence Value ProxyNames) then
+            of Persistence#Value#VarNames#TokenNames then
                 % Found a ticket. We register those proxies to the client's IP
                 % and port, so they could transparently receive the updates.
-                {RegisterLocalProxies IP Port SiteID ProxyNames}
+                {ReflectionEx.registerRemoteObjects variable VarNames SiteID ReflectionCallback IP#Port}
+                {ForAll TokenNames ReflectionEx.tokenAddRef}
 
                 % Remove the ticket if it can only be offered once.
                 if Persistence == once then
                     {Dictionary.remove TicketStore TicketID}
                 end
 
-                Result = ok(Value ProxyNames)
+                Result = ok(Value#VarNames#TokenNames)
             else
                 % Ticket not found.
                 Result = notFound
             end
         end
 
-        meth receive(Value ProxyNames ip:IP port:Port siteID:SiteID result:?Result)
-            {RegisterRemoteProxies IP Port SiteID ProxyNames}
-            Result = {ProxyValue.decode Value}
+        meth receive(Value#VarNames#TokenNames ip:IP port:Port siteID:SiteID result:?Result)
+            {ReflectionEx.registerRemoteObjects variable VarNames SiteID ReflectionCallback IP#Port}
+            {ReflectionEx.registerRemoteObjects token TokenNames SiteID ReflectionCallback IP#Port}
+            Result = {ReflectionEx.decode Value}
         end
     end
 
     class PerformProcessor from Processor
         meth reply(Info ip:IP port:Port siteID:SiteID result:?Result)
-            Action#ProxyNames#SrcName = Info
+            Action#VarNames#TokenNames#SrcName = Info
         in
-            {RegisterRemoteProxies IP Port SiteID ProxyNames}
-            {ProxyValue.injectAction SrcName {ProxyValue.decode Action} SiteID}
+            {ReflectionEx.registerRemoteObjects variable VarNames SiteID ReflectionCallback IP#Port}
+            {ReflectionEx.registerRemoteObjects token TokenNames SiteID ReflectionCallback IP#Port}
+            {ReflectionEx.performAction SrcName {ProxyValue.decode Action}}
             Result = ok
         end
 
@@ -234,8 +230,7 @@ define
     fun {OfferWithPeristence Persistence V}
         TicketID
         NewTicketID
-        EncocdedData
-        NewProxyNames = {NewCell nil}
+        EncocdedData VarNames TokenNames
     in
         {Init}
 
@@ -243,8 +238,8 @@ define
         {Exchange NextTicketID ?TicketID ?NewTicketID}
         NewTicketID = TicketID + 1
 
-        EncocdedData = {ProxyValue.encode V ?NewProxyNames}
-        {Dictionary.put TicketStore TicketID t(Persistence EncocdedData @NewProxyNames)}
+        EncocdedData = {ReflectionEx.encode V ?VarNames ?TokenNames}
+        {Dictionary.put TicketStore TicketID Persistence#EncocdedData#VarNames#TokenNames}
 
         {DSSCommon.getTicketPrefix}#TicketID
     end

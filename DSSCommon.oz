@@ -76,13 +76,14 @@ define
         end)}
     end
 
-    %%% Get the IP used to broadcast this computer.
+    %%% Get the IP (as a virtual string) used to broadcast this computer.
     fun {MyIP} @MyIPCell end
 
-    %%% Get the unique identifier to identify this site in the machine.
+    %%% Get the unique identifier to identify this site in the machine. This
+    %%% must be an atom.
     fun {MySiteID} @MyIdentifierCell end
 
-    %%% Get the port used to access this site.
+    %%% Get the port used to access this site. This must be an integer.
     fun {MyPort} @MyPortCell end
 
     %%% Change the port used to access this site. If called, this method must be
@@ -104,16 +105,16 @@ define
         ["oz-ticket:" nil IPPort "tickets" SiteIDString TicketIDString] =
                 {String.tokens {VirtualString.toString URL} &/}
         TicketID = {StringToInt TicketIDString}
-        SiteID = {VirtualString.toCompactString SiteIDString}
+        SiteID = {VirtualString.toAtom SiteIDString}
         if IPPort.1 == &[ then
             % IPv6.
             {String.token IPPort &] ?IPString ?PortString}
-            IP = {VirtualString.toCompactString IPString#']'}
+            IP = IPString#']'
             Port = {StringToInt PortString.2}
         else
             % IPv4
             {String.token IPPort &: ?IPString ?PortString}
-            IP = {VirtualString.toCompactString IPString}
+            IP = IPString
             Port = {StringToInt PortString}
         end
     end

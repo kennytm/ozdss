@@ -1,21 +1,9 @@
 functor
-import
-    Reflection at 'x-oz://boot/Reflection'
-    System
+export
+    S
 
 define
-    S
-    X = {Reflection.newReflectiveEntity ?S}
-
-    thread
-        for A#C in S do
-            {System.show A}
-            C = unit
-        end
+    fun {S X}
+        {IsUnit X}
     end
-
-    R = {Access X}
-
-
 end
-
