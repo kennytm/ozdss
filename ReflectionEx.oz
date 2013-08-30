@@ -169,16 +169,22 @@ define
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     %%% A common class for all those that support a callback.
-    class C_CallbackSupported
+    class C_ReflectiveCommon
         %{{{
         feat
             %%% The name to identify itself.
             name
             %%% The callbacks to invoke to perform some actions.
             callbacks: {NewDictionary}
+            %%% The thread which process the stream of actions.
+            streamThread
 
-        meth initWithName(Name)
+        meth init(Name Stream)
             self.name = Name
+            thread
+                self.streamThread = {Thread.this}
+                {self processStream(Stream)}
+            end
         end
 
         %%% Register a callback. The callback must be a procedure of the form
@@ -210,6 +216,11 @@ define
                 end
             end
         end
+
+        %%% Terminate the stream-processing thread in this object.
+        meth terminateThread
+            {Thread.terminate self.streamThread}
+        end
         %}}}
     end
 
@@ -222,14 +233,14 @@ define
     %%% Find the name of corresponding to a reflective variable. If not found,
     %%% returns `unit` (note: O(n)).
     fun {P_FindNameForVariable ReflVar}
-        {ListEx.findFirst {WeakDictionary.items G_Variables} fun {$ _#V}
+        {ListEx.findFirst {Dictionary.entries G_Variables} fun {$ _#V}
             V.reflVar == ReflVar
         end unit#unit}.1
     end
 
     %%% A holder of reflective variables. These instances will be added to the
     %%% UnboundVariables dictionary.
-    class C_ReflectiveVariable from C_CallbackSupported
+    class C_ReflectiveVariable from C_ReflectiveCommon
         %{{{
         feat
             reflVar
@@ -238,12 +249,9 @@ define
         meth initWithName(Name)
             Stream
         in
-            C_CallbackSupported,initWithName(Name)
+            C_ReflectiveCommon,init(Name Stream)
             self.reflVar = {Reflection.newReflectiveVariable ?Stream}
             {Dictionary.put G_Variables Name self}
-            thread
-                {self processStream(Stream)}
-            end
         end
 
         %%% Initialize the reflective variable with a free variable. The
@@ -260,13 +268,13 @@ define
         in
             case Action
             of bind(X) then
-                {self invokeCallbacks(Action)}
-                {Reflection.bindReflectiveVariable self.reflVar X}
-                {WeakDictionary.remove G_Variables self.name}
+                {self bind(X)}
                 ShouldContinue = false
             [] markNeeded then
                 % what to do with 'markNeeded'??
-                ShouldContinue = true
+                {System.show ['markNeeded?' self.name {Thread.this}]}
+                {Wait self.reflVar}
+                ShouldContinue = false
             else
                 {Exception.raiseError unknownAction(Action)}
                 ShouldContinue = false
@@ -280,6 +288,12 @@ define
         meth getObject(?R)
             R = self.reflVar
         end
+
+        meth bind(X)
+            {self invokeCallbacks(bind(X))}
+            {Reflection.bindReflectiveVariable self.reflVar X}
+            {Dictionary.remove G_Variables self.name}
+        end
         %}}}
     end
 
@@ -290,7 +304,7 @@ define
 
     fun {P_GetTokenName Token}
         %{{{
-        Name = {ListEx.findFirst {Dictionary.items G_KnownTokens} fun {$ _#V}
+        Name = {ListEx.findFirst {Dictionary.entries G_KnownTokens} fun {$ _#V}
             V.token == Token
         end unit#unit}.1
     in
@@ -305,7 +319,7 @@ define
         %}}}
     end
 
-    fun {P_TokenAddRef Name}
+    proc {P_TokenAddRef Name}
         %{{{
         RefCountedToken = {Dictionary.condGet G_KnownTokens Name unit}
     in
@@ -315,12 +329,16 @@ define
         %}}}
     end
 
-    fun {P_PerformAction Name Action}
-        RefCountedToken = {Dictionary.condGet G_KnownTokens Name unit}
-    in
-        if RefCountedToken \= unit then
-            false
+    proc {P_PerformAction Name Action KeyToUnregisterOnBind}
+        case Action
+        of bind(X) then
+            ReflectiveVariable = {Dictionary.get G_Variables Name}
+        in
+            {ReflectiveVariable terminateThread}
+            {ReflectiveVariable unregister(KeyToUnregisterOnBind)}
+            {ReflectiveVariable bind(X)}
         else
+            RefCountedToken = {Dictionary.get G_KnownTokens Name}
             T = RefCountedToken.token
         in
             case Action
@@ -341,7 +359,6 @@ define
                 {System.show unknownAction(Action)}
                 {Exception.raiseError unknownAction(Action)}
             end
-            true
         end
     end
 
@@ -393,28 +410,21 @@ define
         for Name#_ in G_UnknownTokensFinalizationStream do
             Obj = {Dictionary.get G_UnknownTokens Name}
         in
-            {Thread.terminate Obj.streamThread}
+            {Obj terminateThread}
             {Obj invokeCallbacks(':release')}
             {Dictionary.remove G_UnknownTokens Obj.name}
         end
         %}}}
     end
 
-    class C_ReflectiveEntity from C_CallbackSupported
+    class C_ReflectiveEntity from C_ReflectiveCommon
         %{{{
-        feat
-            streamThread
-
         meth initWithName(Name)
             ActionStream
             ReflEntity = {Reflection.newReflectiveEntity ?ActionStream}
-            Self = self
         in
-            C_CallbackSupported,initWithName(Name)
+            C_ReflectiveCommon,init(Name ActionStream)
             {WeakDictionary.put G_UnknownTokensEntities Name ReflEntity}
-            self.streamThread = thread
-                {Self processStream(ActionStream)}
-            end
         end
 
         meth processStream(Stream)

@@ -23,7 +23,9 @@ define
 
     C#D#Ready = {Connection2.take Ticket}
 
-    {System.show 'We should receive two arrays: '#{IsArray C}#', '#{IsArray D}}
+    {System.show 'We should receive two arrays: '}
+    {System.show {IsArray C}}
+    {System.show {IsArray D}}
 
     {System.show 'Bounds of the array C: ['#{Array.low C}#', '#{Array.high C}}
     {System.show 'Bounds of the array D: ['#{Array.low D}#', '#{Array.high D}}

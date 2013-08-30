@@ -36,12 +36,17 @@ define
         end
     end
 
+    DebugSerialization = true
+
     % {{{ Low-level Serialization/Deserialization.
 
     %%% Serialize a status code and the containing data of the form `ok(...)`
     %%% or `notFound` etc. to in a VBS suitable for sending. This is mainly for
     %%% sending a reply from server to client.
     fun {SerializeResponse StatusCodeAndData}
+        if DebugSerialization then
+            {System.show [server send {Thread.this} StatusCodeAndData]}
+        end
         {Pickle.pack StatusCodeAndData}
     end
 
@@ -49,7 +54,12 @@ define
     %%% `ok(...)` or `notFound` etc. This is mainly for receiving a reply from
     %%% server to client.
     fun {DeserializeResponse RawData}
-        {Pickle.unpack RawData}
+        Result = {Pickle.unpack RawData}
+    in
+        if DebugSerialization then
+            {System.show [client recv {Thread.this} Result]}
+        end
+        Result
     end
 
     %%% Deserialize a VBS into a request. This is mainly for receiving a request
@@ -57,16 +67,21 @@ define
     %%%
     %%% Returns whether the site ID of the request matches this site's real ID.
     fun {DeserializeRequest RawData ?Action ?ReplyIP ?ReplyPort ?ReplySiteID ?Data}
-        ReplyIPVS SiteID
+        SiteID
     in
-        post(SiteID Action ReplyIPVS ReplyPort ReplySiteID Data) = {Pickle.unpack RawData}
-        ReplyIP = {VirtualString.toCompactString ReplyIPVS}
+        post(SiteID Action ReplyIP ReplyPort ReplySiteID Data) = {Pickle.unpack RawData}
+        if DebugSerialization then
+            {System.show [server recv {Thread.this} Action Data]}
+        end
         SiteID == {DSSCommon.mySiteID}
     end
 
     %%% Serialize a request into VBS. This is mainly for sending a request from
     %%% client to server.
     fun {SerializeRequest SiteID Action ReplyIP ReplyPort ReplySiteID Data}
+        if DebugSerialization then
+            {System.show [client send {Thread.this} Action Data]}
+        end
         {Pickle.pack post(SiteID Action ReplyIP ReplyPort ReplySiteID Data)}
     end
 
@@ -142,9 +157,10 @@ define
         meth reply(Info ip:IP port:Port siteID:SiteID result:?Result)
             Action#VarNames#TokenNames#SrcName = Info
         in
+            {System.show perform#Action#VarNames#TokenNames#SrcName}
             {ReflectionEx.registerRemoteObjects variable VarNames SiteID ReflectionCallback IP#Port}
             {ReflectionEx.registerRemoteObjects token TokenNames SiteID ReflectionCallback IP#Port}
-            {ReflectionEx.performAction SrcName {ReflectionEx.decode Action}}
+            {ReflectionEx.performAction SrcName {ReflectionEx.decode Action} SiteID}
             Result = ok
         end
 
@@ -219,8 +235,8 @@ define
                                          {DSSCommon.myIP} {DSSCommon.myPort}
                                          {DSSCommon.mySiteID}
                                          Info})}
-            Data = {C read(list:$)}
-            {Processors.Action onReply(IP Port SiteID {DeserializeResponse Data} $)}
+            Data = {DeserializeResponse {C read(list:$)}}
+            {Processors.Action onReply(IP Port SiteID Data $)}
         end}
         {C close}
         Result

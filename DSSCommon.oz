@@ -69,11 +69,11 @@ define
             end
         end
         % Check if we've got an IPv6 address. If yes, surround with '[' ... ']'.
-        {VirtualString.toCompactString (if @BestRank mod 2 == 0 then
+        if @BestRank mod 2 == 0 then
             '['#@BestIP#']'
         else
             @BestIP
-        end)}
+        end
     end
 
     %%% Get the IP (as a virtual string) used to broadcast this computer.
@@ -121,7 +121,7 @@ define
 
     %%% Define default settings for DP module
     MyIPCell = {NewCell {Property.condGet 'dss.ip' {GetLocalIP}}}
-    MyIdentifierCell = {NewCell {Property.condGet 'dss.identifier' {VirtualString.toCompactString {UUID.randomUUID}}}}
+    MyIdentifierCell = {NewCell {Property.condGet 'dss.identifier' {VirtualString.toAtom {UUID.randomUUID}}}}
     MyPortCell = {NewCell {Property.condGet 'dss.port' 9000}}
 end
 
