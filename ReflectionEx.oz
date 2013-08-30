@@ -1,9 +1,9 @@
 functor
 import
     Reflection at 'x-oz://boot/Reflection'
-    GenericDictionary
     LinearDictionary
     ListEx
+    System
 
 export
     encode: P_Encode
@@ -59,7 +59,7 @@ define
                     Thing
                 end
             [] variable then
-                {OnVariable Thing}
+                {self.onVariable Thing}
             [] token then
                 if {IsName Thing} then
                     {self.onName Thing}
@@ -74,7 +74,7 @@ define
                     end}
                 in
                     {List.toRecord NewLabel NewContent}
-                $)}
+                end $)}
             end
         end
         %}}}
@@ -95,7 +95,7 @@ define
                 {New C_ReflectiveVariable initWithVar(Var)}.name
             end
         in
-            {Dictionary.put VarNameD VarName unit}
+            {Dictionary.put VarNamesD VarName unit}
             VarName
         end
 
@@ -131,12 +131,12 @@ define
             Cls = C_ReflectiveEntity
         end
 
-        for VarName in VarNames do
+        for Name in Names do
             ExistingVar NewVar
         in
-            {Dictionary.condExchange GD VarName ?ExistingVar _ NewVar}
+            {Dictionary.condExchange GD Name ?ExistingVar _ NewVar}
             if {IsFree ExistingVar} then
-                NewVar = {New Cls initWithName(VarName)}
+                NewVar = {New Cls initWithName(Name)}
             else
                 NewVar = ExistingVar
             end
@@ -153,6 +153,7 @@ define
         in
             for return:R default:Name GD in AllDicts do
                 Obj = {Dictionary.condGet GD Name unit}
+            in
                 if Obj \= unit then
                     {R {Obj getObject($)}}
                 end
@@ -200,7 +201,7 @@ define
         %%% they will be automatically registered with callbacks here as well.
         meth invokeCallbacks(Data)
             VarNames TokenNames
-            EncodedData = {Encode Data ?VarNames ?TokenNames}
+            EncodedData = {P_Encode Data ?VarNames ?TokenNames}
         in
             for Key#(Callback#Context) in {Dictionary.entries self.callbacks} do
                 {P_RegisterRemoteObjects variable VarNames Key Callback Context}
@@ -216,7 +217,7 @@ define
 
     %%% Hold a dictionary of reflective variables. Once the reflective variable
     %%% is bound, we will remove it from the dictionary.
-    G_Variables = {NewDictionary ?_}
+    G_Variables = {NewDictionary}
 
     %%% Find the name of corresponding to a reflective variable. If not found,
     %%% returns `unit` (note: O(n)).
@@ -314,20 +315,6 @@ define
         %}}}
     end
 
-    proc {P_TokenRelease Name}
-        %{{{
-        RefCountedToken = {Dictionary.condGet G_KnownTokens Name unit}
-    in
-        if RefCountedToken \= unit then
-            ShouldRemove = {RefCountedToken release(shouldRemove:$)}
-        in
-            if ShouldRemove then
-                {Dictionary.remove G_KnownTokens Name}
-            end
-        end
-        %}}}
-    end
-
     fun {P_PerformAction Name Action}
         RefCountedToken = {Dictionary.condGet G_KnownTokens Name unit}
     in
@@ -403,7 +390,7 @@ define
 
     proc {P_DoReleaseUnknownTokens}
         %{{{
-        for Name#_ in G_UnknownTokensFinalizationStream
+        for Name#_ in G_UnknownTokensFinalizationStream do
             Obj = {Dictionary.get G_UnknownTokens Name}
         in
             {Thread.terminate Obj.streamThread}
@@ -421,11 +408,12 @@ define
         meth initWithName(Name)
             ActionStream
             ReflEntity = {Reflection.newReflectiveEntity ?ActionStream}
+            Self = self
         in
             C_CallbackSupported,initWithName(Name)
             {WeakDictionary.put G_UnknownTokensEntities Name ReflEntity}
             self.streamThread = thread
-                {self processStream(ActionStream)}
+                {Self processStream(ActionStream)}
             end
         end
 
