@@ -129,7 +129,9 @@ define
             end
         end
 
-        meth receive(Value#VarNames#TokenNames ip:IP port:Port siteID:SiteID result:?Result)
+        meth receive(Info ip:IP port:Port siteID:SiteID result:?Result)
+            Value#VarNames#TokenNames = Info
+        in
             {ReflectionEx.registerRemoteObjects variable VarNames SiteID ReflectionCallback IP#Port}
             {ReflectionEx.registerRemoteObjects token TokenNames SiteID ReflectionCallback IP#Port}
             Result = {ReflectionEx.decode Value}
@@ -142,7 +144,7 @@ define
         in
             {ReflectionEx.registerRemoteObjects variable VarNames SiteID ReflectionCallback IP#Port}
             {ReflectionEx.registerRemoteObjects token TokenNames SiteID ReflectionCallback IP#Port}
-            {ReflectionEx.performAction SrcName {ProxyValue.decode Action}}
+            {ReflectionEx.performAction SrcName {ReflectionEx.decode Action}}
             Result = ok
         end
 
@@ -172,7 +174,7 @@ define
                 C = {S accept(acceptClass:Open.socket accepted:$)}
             in
                 thread
-                    RawData Data Action IP Port SiteID StatusCodeAndData
+                    Data Action IP Port SiteID StatusCodeAndData
                 in
                     % Block until the server is free to read anything.
                     {ForAll {Exchange ServerBlockingQueue $ nil} Wait}
@@ -212,7 +214,6 @@ define
         % we aren't ready to digest.
         Result = {WithBlockingServer fun {$}
             Data
-            Res
         in
             {C send(vs:{SerializeRequest SiteID Action
                                          {DSSCommon.myIP} {DSSCommon.myPort}
@@ -254,7 +255,6 @@ define
 
     fun {Take TicketURL}
         IP Port SiteID TicketID
-        Result
     in
         {Init}
         {DSSCommon.parseTicketURL TicketURL ?IP ?Port ?SiteID ?TicketID}
