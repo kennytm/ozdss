@@ -353,9 +353,9 @@ define
             [] arrayPut(I V) then {Put T I V}
             [] arrayExchange(I ?O N) then {Array.exchange T I O N}
             [] isArray(?R) then R = {IsArray T}
-            [] arrayHigh(?R) then R = {Array.high T}
-	    [] arrayLow(?R) then R = {Array.low T}
-	    [] send(X) then {Send T X}
+	    [] arrayHigh(?R) then R = {Array.high T}
+            [] arrayLow(?R) then R = {Array.low T}
+            [] send(X) then {Send T X}
             else
                 {System.show unknownAction(Action)}
                 {Exception.raiseError unknownAction(Action)}
