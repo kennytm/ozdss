@@ -210,7 +210,6 @@ define
             EncodedData = {P_Encode Data ?VarNames ?TokenNames}
         in
             for Key#(Callback#Context) in {Dictionary.entries self.callbacks} do
-                {P_RegisterRemoteObjects variable VarNames Key Callback Context}
                 thread
                     {Callback Key Context self.name EncodedData VarNames TokenNames}
                 end
@@ -259,7 +258,7 @@ define
         %%% instance.
         meth initWithVar(Variable)
             {self initWithName({NewName})}
-            Variable = self.reflVar
+            {Reflection.become Variable self.reflVar}
         end
 
         meth processStream(Stream)
@@ -290,9 +289,9 @@ define
         end
 
         meth bind(X)
-            {self invokeCallbacks(bind(X))}
             {Reflection.bindReflectiveVariable self.reflVar X}
             {Dictionary.remove G_Variables self.name}
+            {self invokeCallbacks(bind(X))}
         end
         %}}}
     end
@@ -366,12 +365,13 @@ define
     class C_RefCountedToken
         %{{{
         feat
-            name: {NewName}
+            name
             token
         attr
             refCount: 1
 
         meth init(Token)
+            self.name = {NewName}
             self.token = Token
         end
 

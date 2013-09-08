@@ -157,7 +157,6 @@ define
         meth reply(Info ip:IP port:Port siteID:SiteID result:?Result)
             Action#VarNames#TokenNames#SrcName = Info
         in
-            {System.show perform#Action#VarNames#TokenNames#SrcName}
             {ReflectionEx.registerRemoteObjects variable VarNames SiteID ReflectionCallback IP#Port}
             {ReflectionEx.registerRemoteObjects token TokenNames SiteID ReflectionCallback IP#Port}
             {ReflectionEx.performAction SrcName {ReflectionEx.decode Action} SiteID}
