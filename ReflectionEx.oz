@@ -355,6 +355,7 @@ define
             [] isArray(?R) then R = {IsArray T}
             [] arrayHigh(?R) then R = {Array.high T}
             [] arrayLow(?R) then R = {Array.low T}
+            [] send(X) then {Send T X}
             else
                 {System.show unknownAction(Action)}
                 {Exception.raiseError unknownAction(Action)}
