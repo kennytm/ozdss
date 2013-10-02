@@ -179,6 +179,30 @@ define
 
     ServerBlockingQueue = {NewCell nil}
 
+    %%% Read a list of bytes from S, written using WriteSocket.
+    fun {ReadSocket S}
+        [R0 R1 R2 R3] = {S read(list:$ size:4)}
+        Size = R0 + 256*(R1 + 256*(R2 + 256*R3))
+    in
+        {S read(list:$ size:Size)}
+    end
+
+    %%% Write a virtual byte string VBS into the socket S, prefixed by the
+    %%% length of VBS.
+    proc {WriteSocket S VBS}
+        L0 = {VirtualByteString.length VBS}
+        R0 = L0 mod 256
+        L1 = L0 div 256
+        R1 = L1 mod 256
+        L2 = L1 div 256
+        R2 = L2 mod 256
+        L3 = L2 div 256
+        R3 = L3 mod 256
+    in
+        {S write(vs:[R0 R1 R2 R3])}
+        {S write(vs:VBS)}
+    end
+
     proc {RunServer}
         S = {New Open.socket init}
     in
@@ -194,7 +218,7 @@ define
                     % Block until the server is free to read anything.
                     {ForAll {Exchange ServerBlockingQueue $ nil} Wait}
                     StatusCodeAndData = try
-                        if {DeserializeRequest {C read(list:$)} ?Action ?IP ?Port ?SiteID ?Data} then
+                        if {DeserializeRequest {ReadSocket C} ?Action ?IP ?Port ?SiteID ?Data} then
                             {Processors.Action reply(Data ip:IP port:Port siteID:SiteID result:$)}
                         else
                             badRequest
@@ -203,7 +227,7 @@ define
                         {System.show E}
                         internalServerError
                     end
-                    {C write(vs:{SerializeResponse StatusCodeAndData})}
+                    {WriteSocket C {SerializeResponse StatusCodeAndData}}
                 end
             end
         end
@@ -229,12 +253,14 @@ define
         % we aren't ready to digest.
         Result = {WithBlockingServer fun {$}
             Data
+            VS
         in
-            {C send(vs:{SerializeRequest SiteID Action
-                                         {DSSCommon.myIP} {DSSCommon.myPort}
-                                         {DSSCommon.mySiteID}
-                                         Info})}
-            Data = {DeserializeResponse {C read(list:$)}}
+            VS = {SerializeRequest SiteID Action
+                                   {DSSCommon.myIP} {DSSCommon.myPort}
+                                   {DSSCommon.mySiteID}
+                                   Info}
+            {WriteSocket C VS}
+            Data = {DeserializeResponse {ReadSocket C}}
             {Processors.Action onReply(IP Port SiteID Data $)}
         end}
         {C close}
