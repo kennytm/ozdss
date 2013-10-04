@@ -36,7 +36,7 @@ define
         end
     end
 
-    DebugSerialization = true
+    DebugSerialization = false
 
     % {{{ Low-level Serialization/Deserialization.
 

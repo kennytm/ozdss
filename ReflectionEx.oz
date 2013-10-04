@@ -244,12 +244,16 @@ define
         feat
             reflVar
 
+        attr
+            needed
+
         %%% Initialize the reflective variable with a known name.
         meth initWithName(Name)
             Stream
         in
             C_ReflectiveCommon,init(Name Stream)
             self.reflVar = {Reflection.newReflectiveVariable ?Stream}
+            needed <- false
             {Dictionary.put G_Variables Name self}
         end
 
@@ -268,12 +272,18 @@ define
             case Action
             of bind(X) then
                 {self bind(X)}
-                ShouldContinue = false
+                ShouldContinue = true
+            [] bindReadOnly(X) then
+                {self bind(X)}
+                ShouldContinue = true
             [] markNeeded then
-                % what to do with 'markNeeded'??
-                {System.show ['markNeeded?' self.name {Thread.this}]}
-                {Wait self.reflVar}
-                ShouldContinue = false
+                % Tell everyone this variable becomes needed.
+                if {Not @needed} then
+                    needed <- true
+                    {Value.makeNeeded self.reflVar}
+                    {self invokeCallbacks(markNeeded)}
+                end
+                ShouldContinue = true
             else
                 {Exception.raiseError unknownAction(Action)}
                 ShouldContinue = false
@@ -294,6 +304,23 @@ define
             {self invokeCallbacks(bind(X))}
         end
         %}}}
+    end
+
+    proc {P_PerformVarAction Name Action KeyToUnregisterOnBind}
+        ReflectiveVariable = case {Dictionary.condGet G_Variables Name unit}
+        of unit then
+            {New C_ReflectiveVariable initWithName(Name)}
+        [] RV then
+            RV
+        end
+        R = {ReflectiveVariable getObject($)}
+    in
+        case Action
+        of bind(X) then
+            R = X
+        [] markNeeded then
+            {Value.makeNeeded R}
+        end
     end
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -330,12 +357,10 @@ define
 
     proc {P_PerformAction Name Action KeyToUnregisterOnBind}
         case Action
-        of bind(X) then
-            ReflectiveVariable = {Dictionary.get G_Variables Name}
-        in
-            {ReflectiveVariable terminateThread}
-            {ReflectiveVariable unregister(KeyToUnregisterOnBind)}
-            {ReflectiveVariable bind(X)}
+        of bind(_) then
+            {P_PerformVarAction Name Action KeyToUnregisterOnBind}
+        [] markNeeded then
+            {P_PerformVarAction Name Action KeyToUnregisterOnBind}
         else
             RefCountedToken = {Dictionary.get G_KnownTokens Name}
             T = RefCountedToken.token
