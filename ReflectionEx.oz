@@ -42,13 +42,13 @@ define
             OldLD = referencesLD <- NewLD
             NewLD = {LinearDictionary.condPut OldLD Key ?OldVal NewVal ?IsExisting}
             if IsExisting then
-                RetVal = OldVal
+                NewVal = OldVal
             else
                 NewVal = {F Key}
-                RetVal = NewVal
             end
+            RetVal = NewVal
         end
-
+        
         %%% Walk on a thing. Return the transformed thing.
         meth walk(Thing ?RetVal)
             RetVal = case {Reflection.getStructuralBehavior Thing}
