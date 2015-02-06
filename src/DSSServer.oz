@@ -235,7 +235,7 @@ define
         end
 
         meth getFaultStream(Object ?Result)
-            Result = {Dictionary.get self.faultStreams {self '_findObjectName'(Object $)}}
+            Result = !!{Dictionary.get self.faultStreams {self '_findObjectName'(Object $)}}
         end
 
         meth kill(Object)
